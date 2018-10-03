@@ -55,6 +55,9 @@ const (
 	// By default, this will be the block type given to all blocks
 	// that aren't explicitly some other type.
 	defaultBlockTypeDefault = keybase1.BlockType_DATA
+
+	// By default, use v1 block encryption.
+	defaultBlockCryptVersion = kbfscrypto.EncryptionSecretbox
 )
 
 // ConfigLocal implements the Config interface using purely local
@@ -124,6 +127,9 @@ type ConfigLocal struct {
 
 	// metadataVersion is the version to use when creating new metadata.
 	metadataVersion kbfsmd.MetadataVer
+
+	// blockCryptVersion is the version to use when encrypting blocks.
+	blockCryptVersion kbfscrypto.EncryptionVer
 
 	mode InitMode
 
@@ -436,6 +442,8 @@ func NewConfigLocal(mode InitMode,
 	config.quotaUsage =
 		make(map[keybase1.UserOrTeamID]*EventuallyConsistentQuotaUsage)
 	config.rekeyFSMLimiter = NewOngoingWorkLimiter(config.Mode().RekeyWorkers())
+
+	config.blockCryptVersion = defaultBlockCryptVersion
 
 	return config
 }
@@ -840,7 +848,16 @@ func (c *ConfigLocal) DataVersion() DataVer {
 
 // BlockCryptVersion implements the Config interface for ConfigLocal.
 func (c *ConfigLocal) BlockCryptVersion() kbfscrypto.EncryptionVer {
-	return kbfscrypto.EncryptionSecretbox
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.blockCryptVersion
+}
+
+// SetBlockCryptVersion implements the Config interface for ConfigLocal.
+func (c *ConfigLocal) SetBlockCryptVersion(ver kbfscrypto.EncryptionVer) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.blockCryptVersion = ver
 }
 
 // DefaultBlockType implements the Config interface for ConfigLocal.
