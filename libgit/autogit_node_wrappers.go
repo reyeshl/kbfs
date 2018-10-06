@@ -82,6 +82,10 @@ func (rfn repoFileNode) GetFile(ctx context.Context) billy.File {
 			return nil
 		}
 	*/
+	rfn.am.log.CDebugf(ctx, "STARTING FILE OPEN %s", rfn.filePath)
+	defer func() {
+		rfn.am.log.CDebugf(ctx, "ENDING FILE OPEN %s", rfn.filePath)
+	}()
 	f, err := rfn.b.Open(rfn.filePath)
 	if err != nil {
 		rfn.am.log.CDebugf(ctx, "Error opening file: %+v", err)
@@ -152,6 +156,8 @@ func (rdn repoDirNode) WrapChild(child libkbfs.Node) libkbfs.Node {
 	child = rdn.Node.WrapChild(child)
 	name := child.GetBasename()
 
+	rdn.am.log.CDebugf(nil, "Wrapping %s", name)
+
 	if rdn.subdir == "" && strings.HasPrefix(name, AutogitBranchPrefix) {
 		newBranchPart := strings.TrimPrefix(name, AutogitBranchPrefix)
 		branch := plumbing.ReferenceName(path.Join(
@@ -183,17 +189,18 @@ func (rdn repoDirNode) WrapChild(child libkbfs.Node) libkbfs.Node {
 		return child
 	}
 	if fi.IsDir() {
-		subdir := path.Join(rdn.subdir, name)
-		childB, err := rdn.b.Chroot(subdir)
+		rdn.am.log.CDebugf(nil, "Chrooting %s from %p", name, rdn.b)
+		childB, err := rdn.b.Chroot(name)
 		if err != nil {
 			rdn.am.log.CDebugf(ctx, "Error chroot'ing browser: %+v", err)
 			return nil
 		}
+		rdn.am.log.CDebugf(ctx, "Got chroot'd browser %p", childB)
 		return &repoDirNode{
 			Node:   child,
 			am:     rdn.am,
 			repoFS: rdn.repoFS,
-			subdir: subdir,
+			subdir: path.Join(rdn.subdir, name),
 			branch: rdn.branch,
 			b:      childB.(*Browser),
 		}
@@ -202,7 +209,7 @@ func (rdn repoDirNode) WrapChild(child libkbfs.Node) libkbfs.Node {
 		Node:     child,
 		am:       rdn.am,
 		repoFS:   rdn.repoFS,
-		filePath: path.Join(rdn.subdir, name),
+		filePath: name,
 		branch:   rdn.branch,
 		b:        rdn.b,
 	}
@@ -227,12 +234,9 @@ func (arn autogitRootNode) GetFS(ctx context.Context) billy.Filesystem {
 // WrapChild implements the Node interface for autogitRootNode.
 func (arn autogitRootNode) WrapChild(child libkbfs.Node) libkbfs.Node {
 	child = arn.Node.WrapChild(child)
-	repoFS, err := arn.fs.Chroot(child.GetBasename())
-	if err != nil {
-		arn.am.log.CDebugf(nil, "Error getting repo: %+v", err)
-		return child
-	}
-	b, err := NewBrowser(repoFS.(*libfs.FS), arn.am.config.Clock(), "")
+	ctx := libkbfs.CtxWithRandomIDReplayable(
+		context.Background(), ctxAutogitIDKey, ctxAutogitOpID, arn.am.log)
+	repoFS, b, err := arn.am.GetBrowserForRepo(ctx, arn.fs, child.GetBasename())
 	if err != nil {
 		arn.am.log.CDebugf(nil, "Error making browser: %+v", err)
 		return child
@@ -240,14 +244,12 @@ func (arn autogitRootNode) WrapChild(child libkbfs.Node) libkbfs.Node {
 	rdn := &repoDirNode{
 		Node:   child,
 		am:     arn.am,
-		repoFS: repoFS.(*libfs.FS),
+		repoFS: repoFS,
 		subdir: "",
 		branch: "",
 		b:      b,
 	}
-	if fs, ok := repoFS.(*libfs.FS); ok {
-		arn.am.registerRepoNode(fs.RootNode(), rdn)
-	}
+	arn.am.registerRepoNode(repoFS.RootNode(), rdn)
 	return rdn
 }
 

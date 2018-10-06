@@ -1,6 +1,7 @@
 package object
 
 import (
+	"fmt"
 	"io"
 
 	"gopkg.in/src-d/go-git.v4/plumbing"
@@ -20,6 +21,10 @@ type Blob struct {
 
 // GetBlob gets a blob from an object storer and decodes it.
 func GetBlob(s storer.EncodedObjectStorer, h plumbing.Hash) (*Blob, error) {
+	fmt.Printf("Start GetBlob\n")
+	defer func() {
+		fmt.Printf("End GetBlob\n")
+	}()
 	o, err := s.EncodedObject(plumbing.BlobObject, h)
 	if err != nil {
 		return nil, err

@@ -2065,6 +2065,8 @@ func (fbo *folderBranchOps) statUsingFS(
 		return DirEntry{}, false, nil
 	}
 
+	fbo.log.CDebugf(ctx, "Check autocreate of %s, parent %p", name, node)
+
 	// First check if this is needs to be a faked-out node.
 	autocreate, _, et, _ := node.ShouldCreateMissedLookup(ctx, name)
 	if autocreate && et == FakeDir {
@@ -2074,6 +2076,8 @@ func (fbo *folderBranchOps) statUsingFS(
 		}
 		return de, true, nil
 	}
+
+	fbo.log.CDebugf(ctx, "Checked autocreate of %s, parent %p", name, node)
 
 	fs := node.GetFS(ctx)
 	if fs == nil {
@@ -2214,10 +2218,14 @@ func (fbo *folderBranchOps) statEntry(ctx context.Context, node Node) (
 		return DirEntry{}, err
 	}
 
+	fbo.log.CDebugf(ctx, "statEntry 1")
+
 	nodePath, err := fbo.pathFromNodeForRead(node)
 	if err != nil {
 		return DirEntry{}, err
 	}
+
+	fbo.log.CDebugf(ctx, "statEntry 2")
 
 	lState := makeFBOLockState()
 	var md ImmutableRootMetadata
@@ -2225,7 +2233,9 @@ func (fbo *folderBranchOps) statEntry(ctx context.Context, node Node) (
 		// Look up the node for the parent, and see if it has an FS
 		// that can be used to stat `node`.
 		parentPath := nodePath.parentPath()
+		fbo.log.CDebugf(ctx, "statEntry 3")
 		parentNode := fbo.nodeCache.Get(parentPath.tailPointer().Ref())
+		fbo.log.CDebugf(ctx, "statEntry 4")
 		de, ok, err := fbo.statUsingFS(
 			ctx, lState, parentNode, node.GetBasename())
 		if err != nil {

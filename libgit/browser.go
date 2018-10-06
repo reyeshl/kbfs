@@ -177,6 +177,7 @@ func (b *Browser) Lstat(filename string) (fi os.FileInfo, err error) {
 	}
 
 	var size int64
+	/**
 	if entry.Mode.IsFile() {
 		f, err := b.tree.File(filename)
 		if err != nil {
@@ -193,6 +194,7 @@ func (b *Browser) Lstat(filename string) (fi os.FileInfo, err error) {
 			size += int64(len(e.Name))
 		}
 	}
+	*/
 
 	// Git doesn't keep track of the mtime of individual files
 	// anywhere, so just use the timestamp from the commit.

@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/keybase/client/go/logger"
 	"github.com/keybase/client/go/protocol/keybase1"
 	"github.com/keybase/kbfs/libfs"
@@ -31,6 +32,16 @@ const (
 	ctxAutogitIDKey ctxAutogitTagKey = iota
 )
 
+type browserCacheKey struct {
+	fs       *libfs.FS
+	repoName string
+}
+
+type browserCacheValue struct {
+	repoFS  *libfs.FS
+	browser *Browser
+}
+
 // AutogitManager can clone and pull source git repos into a
 // destination folder, potentially across different TLFs.  New
 // requests for an operation in a destination repo are blocked by any
@@ -48,12 +59,20 @@ type AutogitManager struct {
 	deleteCancels          map[string]context.CancelFunc
 	shutdown               bool
 
+	browserLock  sync.Mutex
+	browserCache *lru.Cache
+
 	doRemoveSelfCheckouts sync.Once
 }
 
 // NewAutogitManager constructs a new AutogitManager instance.
 func NewAutogitManager(config libkbfs.Config) *AutogitManager {
 	log := config.MakeLogger("")
+	browserCache, err := lru.New(25)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	return &AutogitManager{
 		config:                 config,
 		log:                    log,
@@ -61,6 +80,7 @@ func NewAutogitManager(config libkbfs.Config) *AutogitManager {
 		registeredFBs:          make(map[libkbfs.FolderBranch]bool),
 		repoNodesForWatchedIDs: make(map[libkbfs.NodeID]*repoDirNode),
 		deleteCancels:          make(map[string]context.CancelFunc),
+		browserCache:           browserCache,
 	}
 }
 
@@ -223,6 +243,41 @@ func (am *AutogitManager) BatchChanges(
 func (am *AutogitManager) TlfHandleChange(
 	ctx context.Context, newHandle *libkbfs.TlfHandle) {
 	// Do nothing.
+}
+
+func (am *AutogitManager) GetBrowserForRepo(
+	ctx context.Context, gitFS *libfs.FS, repoName string) (
+	*libfs.FS, *Browser, error) {
+	key := browserCacheKey{gitFS, repoName}
+
+	am.browserLock.Lock()
+	defer am.browserLock.Unlock()
+	tmp, ok := am.browserCache.Get(key)
+	if ok {
+		b, ok := tmp.(browserCacheValue)
+		if !ok {
+			return nil, nil, errors.Errorf("Bad browser in cache: %T", tmp)
+		}
+		return b.repoFS, b.browser, nil
+	}
+
+	// It's kind of dumb to hold the browser lock through all of this,
+	// but it doesn't seem worthwhile to build the whole
+	// channel/notification system that would be needed to manage
+	// multiple concurrent requests for the same repo node.
+
+	am.log.CDebugf(ctx, "Making repo for %s", repoName)
+	billyFS, err := gitFS.Chroot(repoName)
+	if err != nil {
+		return nil, nil, err
+	}
+	repoFS := billyFS.(*libfs.FS)
+	browser, err := NewBrowser(repoFS, am.config.Clock(), "")
+	if err != nil {
+		return nil, nil, err
+	}
+	am.browserCache.Add(key, browserCacheValue{repoFS, browser})
+	return repoFS, browser, nil
 }
 
 // StartAutogit launches autogit, and returns a function that should
